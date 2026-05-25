@@ -1,7 +1,7 @@
-# SOMA Retargeter
+# SOMA Retargeter - Unitree H2 Adaptation
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-![SOMA Retargeter Banner](assets/docs/banner.gif)
+![SOMA Retargeter Unitree H2 Banner](assets/docs/banner.gif)
 
 Convert [SOMA](https://github.com/NVlabs/SOMA-X) human motion captures into humanoid robot joint animation. Takes BVH motion files as input and produces robot-playable CSV joint data as output using GPU-optimized inverse kinematics via [Newton](https://github.com/newton-physics/newton) and high-performance computation with [NVIDIA Warp](https://github.com/NVIDIA/warp).
 
@@ -10,6 +10,19 @@ The retargeting pipeline handles proportional human-to-robot scaling, multi-obje
 SOMA Retargeter is part of the [SOMA body model](https://github.com/NVlabs/SOMA-X) ecosystem for humanoid motion data.
 
 > **Note:** This project is in active development. The API may change between releases as the design is refined.
+
+## Unitree H2 Fork Changes
+
+This fork adds a functional Unitree H2 target on top of SOMA Retargeter:
+
+- Added local Unitree H2 robot assets, including MJCF, URDF, meshes, license notes, and packaging/LFS rules.
+- Added SOMA-to-H2 retargeting, scaling, and feet-stabilization configs under `soma_retargeter/configs/unitree_h2/`.
+- Added `assets/h2_bvh_to_csv_config.json` for H2 viewer and batch conversion workflows.
+- Added 31-DOF H2 CSV export matching the MuJoCo `qpos[7:]` joint order documented in `soma_retargeter/robot_assets/unitree_h2/JOINT_ORDER.md`.
+- Generalized the pipeline and viewer from a G1-only target path to explicit robot target selection for Unitree G1 and Unitree H2.
+- Added viewer startup options for loading BVH/CSV files directly and retargeting on launch, plus a separated default layout for comparing SOMA and H2 motion.
+
+The current H2 parameters are intended for visualization and offline CSV generation. Before hardware deployment, verify joint order, joint signs, command units, limits, and controller expectations against the target robot stack.
 
 ## Requirements
 
@@ -90,16 +103,6 @@ For large-scale motion data, see the [SEED dataset](https://huggingface.co/datas
 ### Interactive viewer (OpenGL)
 
 ```bash
-python ./app/bvh_to_csv_converter.py --config ./assets/default_bvh_to_csv_converter_config.json --viewer gl
-```
-
-![Interactive viewer interface](assets/docs/interactive-viewer-screenshot.png)
-
-The viewer displays the source SOMA motion alongside the retargeted robot in a 3D viewport. Use the right panel to load BVH files, run retargeting, and save CSV output. Playback controls at the bottom allow scrubbing, speed adjustment, and looping. Toggle visibility of the skinned mesh, skeleton, joint axes, and positioning gizmos.
-
-To open the viewer directly with the Unitree H2 target and an example motion:
-
-```bash
 python ./app/bvh_to_csv_converter.py \
   --config ./assets/h2_bvh_to_csv_config.json \
   --viewer gl \
@@ -107,7 +110,27 @@ python ./app/bvh_to_csv_converter.py \
   --retarget-on-load
 ```
 
+![Interactive H2 viewer interface](assets/docs/interactive_viewer_h2.gif)
+
+The viewer displays the source SOMA motion alongside the retargeted robot in a 3D viewport. Use the right panel to load BVH files, run retargeting, and save CSV output. Playback controls at the bottom allow scrubbing, speed adjustment, and looping. Toggle visibility of the skinned mesh, skeleton, joint axes, and positioning gizmos.
+
+To open the viewer without preloading a motion, omit `--bvh` and `--retarget-on-load`. To use the default Unitree G1 target instead:
+
+```bash
+python ./app/bvh_to_csv_converter.py --config ./assets/default_bvh_to_csv_converter_config.json --viewer gl
+```
+
 The `--bvh` and `--csv` options load files at startup. `--retarget-on-load` immediately runs retargeting for the loaded BVH. These options are useful on Linux systems without `tkinter`, where the viewer still works but native file dialogs are unavailable.
+
+### Documentation GIFs
+
+The original repository ships `assets/docs/banner.gif` as a checked-in GIF asset and does not include a dedicated banner-generation script. For this H2 fork, the banner was replaced with an H2 viewer GIF. To regenerate a banner from a captured viewer GIF, export a polished capture and replace `assets/docs/banner.gif`; for example:
+
+```bash
+ffmpeg -y -i assets/docs/interactive_viewer_h2.gif \
+  -vf "fps=14,scale=1908:-1:flags=lanczos,crop=1908:840:0:170" \
+  assets/docs/banner.gif
+```
 
 ### Batch conversion (headless)
 
