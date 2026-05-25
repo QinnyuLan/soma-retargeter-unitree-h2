@@ -8,7 +8,7 @@
 
     "ik_iterations" : 24,
     "joint_limit_weight": 10.0,
-    "smooth_joint_filter_weight": 5.5,
+    "smooth_joint_filter_weight": 6.5,
     "collision_weight" : 0.0,
     "enable_post_processing" : true,
 
@@ -85,8 +85,8 @@
         "LeftFoot": {
             "t_body" : "left_sole_link",
             "r_body" : "left_sole_link",
-            "t_weight" : 30.0,
-            "r_weight" : 2.0
+            "t_weight" : 24.0,
+            "r_weight" : 1.5
         },
         "RightLeg": {
             "t_body" : "right_hip_roll_link",
@@ -103,8 +103,8 @@
         "RightFoot": {
             "t_body" : "right_sole_link",
             "r_body" : "right_sole_link",
-            "t_weight" : 30.0,
-            "r_weight" : 2.0
+            "t_weight" : 24.0,
+            "r_weight" : 1.5
         }
     }
 }
