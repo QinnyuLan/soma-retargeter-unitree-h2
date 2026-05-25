@@ -103,34 +103,12 @@ For large-scale motion data, see the [SEED dataset](https://huggingface.co/datas
 ### Interactive viewer (OpenGL)
 
 ```bash
-python ./app/bvh_to_csv_converter.py \
-  --config ./assets/h2_bvh_to_csv_config.json \
-  --viewer gl \
-  --bvh assets/motions/bvh/dance_hiphop_shuffle_square_R_fast_002__A318.bvh \
-  --retarget-on-load
-```
-
-![Interactive H2 viewer interface](assets/docs/interactive_viewer_h2.gif)
-
-The viewer displays the source SOMA motion alongside the retargeted robot in a 3D viewport. Use the right panel to load BVH files, run retargeting, and save CSV output. Playback controls at the bottom allow scrubbing, speed adjustment, and looping. Toggle visibility of the skinned mesh, skeleton, joint axes, and positioning gizmos.
-
-To open the viewer without preloading a motion, omit `--bvh` and `--retarget-on-load`. To use the default Unitree G1 target instead:
-
-```bash
 python ./app/bvh_to_csv_converter.py --config ./assets/default_bvh_to_csv_converter_config.json --viewer gl
 ```
 
+The viewer displays the source SOMA motion alongside the retargeted robot in a 3D viewport. Use the right panel to load BVH files, run retargeting, and save CSV output. Playback controls at the bottom allow scrubbing, speed adjustment, and looping. Toggle visibility of the skinned mesh, skeleton, joint axes, and positioning gizmos.
+
 The `--bvh` and `--csv` options load files at startup. `--retarget-on-load` immediately runs retargeting for the loaded BVH. These options are useful on Linux systems without `tkinter`, where the viewer still works but native file dialogs are unavailable.
-
-### Documentation GIFs
-
-The original repository ships `assets/docs/banner.gif` as a checked-in GIF asset and does not include a dedicated banner-generation script. For this H2 fork, the banner was replaced with an H2 viewer GIF. To regenerate a banner from a captured viewer GIF, export a polished capture and replace `assets/docs/banner.gif`; for example:
-
-```bash
-ffmpeg -y -i assets/docs/interactive_viewer_h2.gif \
-  -vf "fps=14,scale=1908:-1:flags=lanczos,crop=1908:840:0:170" \
-  assets/docs/banner.gif
-```
 
 ### Batch conversion (headless)
 
@@ -153,6 +131,18 @@ python ./app/bvh_to_csv_converter.py --config ./assets/h2_bvh_to_csv_config.json
 Unitree H2 support includes a local MJCF model, mesh assets, 31-DOF CSV output order, SOMA-to-H2 retargeting settings, human-to-robot scaling, and feet stabilization. The H2 assets live under `soma_retargeter/robot_assets/unitree_h2/` and are distributed under Unitree Robotics' BSD 3-Clause license included in that directory.
 
 The H2 CSV joint order follows the MuJoCo `qpos[7:]` order documented in `soma_retargeter/robot_assets/unitree_h2/JOINT_ORDER.md`. Verify SDK motor order, joint signs, command units, and whether the deployed controller expects head, waist, and wrist joints before sending exported motion to hardware.
+
+To open the viewer directly with the Unitree H2 target and an example motion:
+
+```bash
+python ./app/bvh_to_csv_converter.py \
+  --config ./assets/h2_bvh_to_csv_config.json \
+  --viewer gl \
+  --bvh assets/motions/bvh/dance_hiphop_shuffle_square_R_fast_002__A318.bvh \
+  --retarget-on-load
+```
+
+![Interactive H2 viewer interface](assets/docs/interactive_viewer_h2.gif)
 
 ### H2 Tuning
 
