@@ -13,6 +13,7 @@ import soma_retargeter.assets.bvh as bvh_utils
 import soma_retargeter.assets.csv as csv_utils
 import soma_retargeter.utils.io_utils as io_utils
 import soma_retargeter.pipelines.utils as pipeline_utils
+import soma_retargeter.robotics.robot_model as robot_model
 
 from soma_retargeter.renderers.skeleton_renderer import SkeletonRenderer
 from soma_retargeter.renderers.mesh_renderer import SkeletalMeshRenderer
@@ -25,6 +26,7 @@ from tqdm import trange
 _UI_NEWTON_PANEL_WIDTH  = 320
 _UI_NEWTON_PANEL_MARGIN = 10
 _UI_NEWTON_PANEL_ALPHA  = 0.9
+_DEFAULT_VISUAL_SEPARATION = 1.0
 _DEFAULT_COLOR = (235.0 / 255.0, 245.0 / 255.0, 112.0 / 255.0)
 
 class Viewer:
@@ -49,11 +51,15 @@ class Viewer:
         self.playback_total_time = 0.0
 
         self.retarget_source_options = ['soma']
-        self.retarget_target_options = ['unitree_g1']
+        self.retarget_target_options = robot_model.get_supported_robot_types()
         self.retarget_solver_options = ['Newton']
         self.retarget_solver_idx     = 0
-        self.retarget_target_idx     = 0
         self.retarget_source_idx     = 0
+        cfg_target = self.config.get('retarget_target', 'unitree_g1')
+        self.retarget_target_idx = (
+            self.retarget_target_options.index(cfg_target)
+            if cfg_target in self.retarget_target_options
+            else 0)
 
         self.show_skeleton_mesh = True
         self.show_skeleton = False
@@ -63,25 +69,23 @@ class Viewer:
         self.viewer.renderer.set_title("BVH to CSV Converter")
         self.viewer.register_ui_callback(lambda ui: self.gui(ui), position="free")
 
-        g1_builder = newton.ModelBuilder()
-        g1_builder.add_mjcf(
-            newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml")
+        robot_builder = robot_model.create_robot_builder(self.retarget_target_options[self.retarget_target_idx])
         
         self.num_robots = 1
-        self.robot_offsets = [wp.transform(wp.vec3(0.0, i - (self.num_robots - 1) / 2.0, 0.0), wp.quat_identity()) for i in range(self.num_robots)]
+        self.robot_offsets = self._default_robot_offsets()
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
         for _ in range(self.num_robots):
-            builder.add_builder(g1_builder, wp.transform_identity())
+            builder.add_builder(robot_builder, wp.transform_identity())
         self.model = builder.finalize()
 
         self.viewer.set_model(self.model)
         self.viewer.set_world_offsets([0, 0, 0])
         self.state = self.model.state()
 
-        self.g1_num_joint_q = self.model.joint_coord_count // self.model.articulation_count
-        self.g1_joint_q_offsets = [int(i * self.g1_num_joint_q) for i in range(self.model.articulation_count)]
-        self.g1_default_joint_q_values = self.model.joint_q.numpy()
+        self.robot_num_joint_q = self.model.joint_coord_count // self.model.articulation_count
+        self.robot_joint_q_offsets = [int(i * self.robot_num_joint_q) for i in range(self.model.articulation_count)]
+        self.robot_default_joint_q_values = self.model.joint_q.numpy()
 
         self.coordinate_renderer = CoordinateRenderer()
         self.skeleton = None
@@ -93,12 +97,58 @@ class Viewer:
         self.skeleton_instances = []
         self.robot_csv_animation_buffers = [None for _ in range(self.num_robots)]
 
+    def _get_csv_config(self):
+        target = self.retarget_target_options[self.retarget_target_idx]
+        return csv_utils.get_csv_config(target)
+
+    def _default_robot_offsets(self):
+        return [
+            wp.transform(
+                wp.vec3(0.0, i - (self.num_robots - 1) / 2.0 - _DEFAULT_VISUAL_SEPARATION / 2.0, 0.0),
+                wp.quat_identity())
+            for i in range(self.num_robots)]
+
+    @staticmethod
+    def _default_animation_offsets(num_instances):
+        return [
+            wp.transform(
+                wp.vec3(0.0, i - (num_instances - 1) / 2.0 + _DEFAULT_VISUAL_SEPARATION / 2.0, 0.0),
+                wp.quat_identity())
+            for i in range(num_instances)]
+
+    @staticmethod
+    def _open_file_dialog(title, defaultextension, filetypes, save=False):
+        try:
+            import tkinter as tk
+            from tkinter import filedialog as tk_filedialog
+        except ModuleNotFoundError:
+            print(
+                "[WARNING]: tkinter is not available. Install python3.12-tk "
+                "or use --bvh/--csv to load files from the command line.")
+            return None
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            if save:
+                return tk_filedialog.asksaveasfilename(
+                    title=title,
+                    defaultextension=defaultextension,
+                    filetypes=filetypes)
+
+            return tk_filedialog.askopenfilename(
+                title=title,
+                defaultextension=defaultextension,
+                filetypes=filetypes)
+        finally:
+            root.destroy()
+
     def gui(self, ui):
         self.ui_playback_controls(ui)
         self.ui_scene_options(ui)
 
     def load_csv_file(self, path):
-        self.robot_csv_animation_buffers[0] = csv_utils.load_csv(path)
+        self.robot_csv_animation_buffers[0] = csv_utils.load_csv(path, csv_config=self._get_csv_config())
         self.compute_playback_total_time()
 
     def load_bvh_file(self, path):
@@ -114,7 +164,7 @@ class Viewer:
         self.skeleton, animation = bvh_utils.load_bvh(path)
         self.skeleton_renderer = SkeletonRenderer(self.skeleton, [0])
         self.skeleton_instances = [SkeletonInstance(self.skeleton, _DEFAULT_COLOR, self.converter.transform(wp.transform_identity()))]
-        self.animation_offsets = [wp.transform_identity()] * len(self.skeleton_instances)
+        self.animation_offsets = self._default_animation_offsets(len(self.skeleton_instances))
         self.animation_buffers = [animation]
 
         self.skeletal_mesh = pipeline_utils.get_source_model_mesh(pipeline_utils.SourceType.SOMA, self.skeleton)
@@ -139,7 +189,7 @@ class Viewer:
         for i in range(self.num_robots):
             robot_offset = self.robot_offsets[i]
 
-            joint_q_offset = self.g1_joint_q_offsets[i]
+            joint_q_offset = self.robot_joint_q_offsets[i]
             if self.robot_csv_animation_buffers[i] is not None:
                 buffer = self.robot_csv_animation_buffers[i]
                 # Apply visual offset
@@ -147,18 +197,18 @@ class Viewer:
                 buffer.xform = robot_offset
 
                 data = buffer.sample(self.playback_time)
-                wp.copy(self.model.joint_q, wp.array(data, dtype=wp.float32), joint_q_offset, 0, self.g1_num_joint_q)
+                wp.copy(self.model.joint_q, wp.array(data, dtype=wp.float32), joint_q_offset, 0, self.robot_num_joint_q)
                 buffer.xform = prev_xform
             else:
                 root_tx = wp.mul(
                     robot_offset,
-                    wp.transform(*self.g1_default_joint_q_values[joint_q_offset:(joint_q_offset + 7)]))
+                    wp.transform(*self.robot_default_joint_q_values[joint_q_offset:(joint_q_offset + 7)]))
 
                 wp.copy(
                     self.model.joint_q,
-                    wp.array(self.g1_default_joint_q_values[joint_q_offset:(joint_q_offset + self.g1_num_joint_q)], dtype=wp.float32),
+                    wp.array(self.robot_default_joint_q_values[joint_q_offset:(joint_q_offset + self.robot_num_joint_q)], dtype=wp.float32),
                     joint_q_offset,
-                    0, self.g1_num_joint_q)
+                    0, self.robot_num_joint_q)
                 wp.copy(self.model.joint_q, wp.array(root_tx[0:7], dtype=wp.float32), joint_q_offset, 0, 7)
 
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state, None)
@@ -243,9 +293,6 @@ class Viewer:
         self.robot_csv_animation_buffers[0] = buffers[0]
 
     def ui_scene_options(self, ui):
-        import tkinter as tk
-        from tkinter import filedialog as tk_filedialog
-        
         viewport = ui.get_main_viewport()
 
         panel_size = ui.ImVec2(320, 320)
@@ -269,9 +316,7 @@ class Viewer:
             
             ui.push_id(100)
             if ui.button("Load"):
-                root = tk.Tk()
-                root.withdraw()
-                bvh_path = tk_filedialog.askopenfilename(
+                bvh_path = self._open_file_dialog(
                     title='Load BVH File',
                     defaultextension=".bvh",
                     filetypes=[('BVH files', '*.bvh')])
@@ -296,9 +341,7 @@ class Viewer:
             
             ui.push_id(200)
             if ui.button("Load"):
-                root = tk.Tk()
-                root.withdraw()
-                csv_path = tk_filedialog.askopenfilename(
+                csv_path = self._open_file_dialog(
                     title='Load CSV File',
                     defaultextension=".csv",
                     filetypes=[('CSV files', '*.csv')])
@@ -312,15 +355,13 @@ class Viewer:
 
             ui.same_line()
             if ui.button("Save"):
-                root = tk.Tk()
-                root.withdraw()
-
-                save_path = tk_filedialog.asksaveasfilename(
+                save_path = self._open_file_dialog(
                     title="Save CSV File",
                     defaultextension=".csv",
-                    filetypes=[("CSV files", "*.csv")])
+                    filetypes=[("CSV files", "*.csv")],
+                    save=True)
                 if save_path:
-                    csv_utils.save_csv(save_path, self.robot_csv_animation_buffers[0])
+                    csv_utils.save_csv(save_path, self.robot_csv_animation_buffers[0], csv_config=self._get_csv_config())
 
             if self.robot_csv_animation_buffers[0] is None:
                 ui.end_disabled()
@@ -342,8 +383,8 @@ class Viewer:
             _, self.show_gizmos = ui.checkbox("Show Gizmos", self.show_gizmos)
             ui.same_line()
             if ui.button("Reset"):
-                self.robot_offsets = [wp.transform(wp.vec3(0.0, i - (self.num_robots - 1) / 2.0, 0.0), wp.quat_identity()) for i in range(self.num_robots)]
-                self.animation_offsets = [wp.transform_identity()] * len(self.skeleton_instances)
+                self.robot_offsets = self._default_robot_offsets()
+                self.animation_offsets = self._default_animation_offsets(len(self.skeleton_instances))
         ui.end()
 
     def ui_playback_controls(self, ui):
@@ -436,6 +477,8 @@ class Viewer:
             print(f"[ERROR]: Invalid retarget solver selected [{retarget_solver}]. Use 'Newton'.")
             exit(-1)
 
+        batch_csv_config = csv_utils.get_csv_config(retarget_target)
+
         nb_retargeted_motions = 0
         start_time = time.time()
 
@@ -465,7 +508,7 @@ class Viewer:
                     csv_buffer = csv_buffers[i]
                     dst_path = export_path / pathlib.Path(batch[i]).relative_to(import_path).with_suffix(".csv")
                     dst_path.parent.mkdir(parents=True, exist_ok=True)
-                    csv_utils.save_csv(dst_path, csv_buffer)
+                    csv_utils.save_csv(dst_path, csv_buffer, csv_config=batch_csv_config)
 
             nb_retargeted_motions += len(batch)
 
@@ -486,6 +529,20 @@ def main():
         type=lambda x: None if x == "None" else str(x),
         default="./assets/default_bvh_to_csv_converter_config.json",
         help="Input json config file.")
+    parser.add_argument(
+        "--bvh",
+        type=str,
+        default=None,
+        help="Optional BVH file to load when the viewer starts.")
+    parser.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        help="Optional robot CSV file to load when the viewer starts.")
+    parser.add_argument(
+        "--retarget-on-load",
+        action="store_true",
+        help="Retarget the BVH immediately after loading it.")
 
     viewer, args = newton.examples.init(parser)
     if not pathlib.Path(args.config).exists():
@@ -496,6 +553,12 @@ def main():
     with wp.ScopedDevice(args.device):
         app = Viewer(viewer, config)
         if not isinstance(viewer, newton.viewer.ViewerNull):
+            if args.bvh:
+                app.load_bvh_file(args.bvh)
+                if args.retarget_on_load:
+                    app.retarget_motion()
+            if args.csv:
+                app.load_csv_file(args.csv)
             app.run()
         else:
             app.batched_retargeting()

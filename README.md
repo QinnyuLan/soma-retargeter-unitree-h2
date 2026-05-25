@@ -5,7 +5,7 @@
 
 Convert [SOMA](https://github.com/NVlabs/SOMA-X) human motion captures into humanoid robot joint animation. Takes BVH motion files as input and produces robot-playable CSV joint data as output using GPU-optimized inverse kinematics via [Newton](https://github.com/newton-physics/newton) and high-performance computation with [NVIDIA Warp](https://github.com/NVIDIA/warp).
 
-The retargeting pipeline handles proportional human-to-robot scaling, multi-objective IK solving with joint limits, feet stabilization to maintain ground contact, and per-DOF joint limit clamping. Currently supports SOMA as the input skeleton and Unitree G1 (29 DOF) as the output robot. Additional robot targets are planned.
+The retargeting pipeline handles proportional human-to-robot scaling, multi-objective IK solving with joint limits, feet stabilization to maintain ground contact, and per-DOF joint limit clamping. Currently supports SOMA as the input skeleton and Unitree G1 (29 DOF) and Unitree H2 (31 DOF) as output robots. Additional robot targets are planned.
 
 SOMA Retargeter is part of the [SOMA body model](https://github.com/NVlabs/SOMA-X) ecosystem for humanoid motion data.
 
@@ -97,6 +97,18 @@ python ./app/bvh_to_csv_converter.py --config ./assets/default_bvh_to_csv_conver
 
 The viewer displays the source SOMA motion alongside the retargeted robot in a 3D viewport. Use the right panel to load BVH files, run retargeting, and save CSV output. Playback controls at the bottom allow scrubbing, speed adjustment, and looping. Toggle visibility of the skinned mesh, skeleton, joint axes, and positioning gizmos.
 
+To open the viewer directly with the Unitree H2 target and an example motion:
+
+```bash
+python ./app/bvh_to_csv_converter.py \
+  --config ./assets/h2_bvh_to_csv_config.json \
+  --viewer gl \
+  --bvh assets/motions/bvh/dance_hiphop_shuffle_square_R_fast_002__A318.bvh \
+  --retarget-on-load
+```
+
+The `--bvh` and `--csv` options load files at startup. `--retarget-on-load` immediately runs retargeting for the loaded BVH. These options are useful on Linux systems without `tkinter`, where the viewer still works but native file dialogs are unavailable.
+
 ### Batch conversion (headless)
 
 Process a folder of BVH files without a display. Set `import_folder` and `export_folder` in the config file, then run:
@@ -106,6 +118,35 @@ python ./app/bvh_to_csv_converter.py --config ./assets/default_bvh_to_csv_conver
 ```
 
 Batch mode recursively finds all `.bvh` files in the import folder, processes them in configurable batch sizes, and writes CSV files to the export folder mirroring the input directory structure.
+
+For Unitree H2 export, use the H2 config:
+
+```bash
+python ./app/bvh_to_csv_converter.py --config ./assets/h2_bvh_to_csv_config.json --viewer null
+```
+
+## Unitree H2 Support
+
+Unitree H2 support includes a local MJCF model, mesh assets, 31-DOF CSV output order, SOMA-to-H2 retargeting settings, human-to-robot scaling, and feet stabilization. The H2 assets live under `soma_retargeter/robot_assets/unitree_h2/` and are distributed under Unitree Robotics' BSD 3-Clause license included in that directory.
+
+The H2 CSV joint order follows the MuJoCo `qpos[7:]` order documented in `soma_retargeter/robot_assets/unitree_h2/JOINT_ORDER.md`. Verify SDK motor order, joint signs, command units, and whether the deployed controller expects head, waist, and wrist joints before sending exported motion to hardware.
+
+### H2 Tuning
+
+Most H2 retargeting behavior is controlled by JSON configs:
+
+- `soma_retargeter/configs/unitree_h2/soma_to_h2_retargeter_config.json`: IK iterations, joint limit/smoothing weights, post-processing, and per-body IK target weights.
+- `soma_retargeter/configs/unitree_h2/soma_to_h2_scaler_config.json`: body-part scale factors and per-joint target offsets from SOMA into the H2 tracking frame.
+- `soma_retargeter/configs/unitree_h2/h2_feet_stabilizer_config.json`: post-process foot stabilization weights and two-bone leg IK hints.
+
+Useful first adjustments:
+
+- Raise/lower the retargeted root by changing the `Hips` z offset in `soma_to_h2_scaler_config.json`.
+- Adjust foot clearance by changing the `LeftFoot` and `RightFoot` z offsets in `soma_to_h2_scaler_config.json`.
+- If the robot over-crouches to satisfy both pelvis and feet, reduce `LeftFoot` and `RightFoot` `t_weight` values in `soma_to_h2_retargeter_config.json` before changing joint limits.
+- If motion is jittery, increase `smooth_joint_filter_weight`; if it feels too sluggish, decrease it.
+
+The current H2 parameters are intended as a functional baseline. They are suitable for visualization and offline CSV generation, but should be calibrated further before hardware deployment.
 
 ## Code Overview
 
