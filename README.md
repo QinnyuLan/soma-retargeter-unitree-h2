@@ -144,6 +144,30 @@ python ./app/bvh_to_csv_converter.py \
 
 ![Interactive H2 viewer interface](assets/docs/interactive_viewer_h2.gif)
 
+### H2 Mesh Video Export
+
+To save Newton-style mesh review videos without using an on-screen OpenGL viewer,
+use the helper scripts in `tools/h2_newton_mesh_videos/`. They render the white
+Unitree H2 mesh next to the yellow SOMA skinned mesh with Blender.
+
+```bash
+uv run python tools/h2_newton_mesh_videos/generate_mesh_video_data.py \
+  --fps 24 \
+  --out-dir outputs/h2_newton_videos/data
+
+blender --background \
+  --python tools/h2_newton_mesh_videos/render_mesh_videos_blender.py -- \
+  --out-dir outputs/h2_newton_videos \
+  --width 1280 \
+  --height 720 \
+  --fps 24 \
+  outputs/h2_newton_videos/data/*.npz
+```
+
+The default export uses five representative sample motions. Generated videos and
+intermediate mesh-pose caches are written under `outputs/`, which is ignored by
+Git.
+
 ### H2 Tuning
 
 Most H2 retargeting behavior is controlled by JSON configs:
