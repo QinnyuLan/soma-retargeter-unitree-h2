@@ -8,7 +8,7 @@ import newton
 import soma_retargeter.utils.io_utils as io_utils
 
 
-_SUPPORTED_ROBOT_TYPES = ("unitree_g1", "unitree_h2")
+_SUPPORTED_ROBOT_TYPES = ("unitree_g1", "unitree_h2", "unitree_h2_sonic")
 
 
 def get_supported_robot_types() -> list[str]:
@@ -20,6 +20,8 @@ def get_robot_mjcf_path(robot_type: str) -> Path:
         return newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml"
     if robot_type == "unitree_h2":
         return io_utils.get_package_root() / "robot_assets" / "unitree_h2" / "h2.xml"
+    if robot_type == "unitree_h2_sonic":
+        return io_utils.get_package_root() / "robot_assets" / "unitree_h2_sonic" / "h2.xml"
 
     allowed = ", ".join(_SUPPORTED_ROBOT_TYPES)
     raise ValueError(f"Unknown robot type: [{robot_type}]. Allowed values: {allowed}")

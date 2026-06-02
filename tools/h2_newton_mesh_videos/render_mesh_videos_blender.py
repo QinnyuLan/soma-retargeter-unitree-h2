@@ -17,8 +17,10 @@ from mathutils import Matrix, Quaternion, Vector
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-H2_XML = REPO_ROOT / "soma_retargeter/robot_assets/unitree_h2/h2.xml"
-H2_MESH_DIR = REPO_ROOT / "soma_retargeter/robot_assets/unitree_h2/meshes"
+ROBOT_ASSETS = {
+    "unitree_h2": REPO_ROOT / "soma_retargeter/robot_assets/unitree_h2",
+    "unitree_h2_sonic": REPO_ROOT / "soma_retargeter/robot_assets/unitree_h2_sonic",
+}
 
 
 def _parse_args():
@@ -142,8 +144,13 @@ def _mjcf_local_matrix(elem):
     return Matrix.LocRotScale(Vector(pos), q, None)
 
 
-def _parse_h2_visual_geoms():
-    root = ET.parse(H2_XML).getroot()
+def _parse_h2_visual_geoms(robot_type):
+    asset_dir = ROBOT_ASSETS.get(robot_type)
+    if asset_dir is None:
+        allowed = ", ".join(sorted(ROBOT_ASSETS))
+        raise ValueError(f"Unsupported robot_type [{robot_type}]. Allowed values: {allowed}")
+
+    root = ET.parse(asset_dir / "h2.xml").getroot()
     mesh_files = {
         mesh.attrib["name"]: mesh.attrib["file"]
         for mesh in root.find("asset").findall("mesh")
@@ -170,7 +177,7 @@ def _parse_h2_visual_geoms():
 
     for body in root.find("worldbody").findall("body"):
         walk(body)
-    return geoms
+    return geoms, asset_dir / "meshes"
 
 
 def _import_stl(path):
@@ -185,14 +192,15 @@ def _import_stl(path):
     return obj
 
 
-def _create_h2_objects(body_names):
+def _create_h2_objects(body_names, robot_type):
     body_index = {name: i for i, name in enumerate(body_names)}
     mats = {}
     objects = []
-    for idx, geom in enumerate(_parse_h2_visual_geoms()):
+    geoms, mesh_dir = _parse_h2_visual_geoms(robot_type)
+    for idx, geom in enumerate(geoms):
         if geom["body"] not in body_index:
             continue
-        obj = _import_stl(H2_MESH_DIR / geom["file"])
+        obj = _import_stl(mesh_dir / geom["file"])
         obj.name = f"h2_{idx:02d}_{geom['body']}_{geom['mesh']}"
         color_key = tuple(round(v, 3) for v in geom["rgba"])
         if color_key not in mats:
@@ -251,13 +259,15 @@ def _render_data_file(data_path, out_dir, width, height, fps, preview_frames=0):
         soma_vertices.append(data[f"soma_vertices_{part_idx}"])
         part_idx += 1
 
-    h2_objects = _create_h2_objects(body_names)
+    meta = json.loads(str(data["metadata"]))
+    robot_type = meta.get("robot_type", "unitree_h2")
+
+    h2_objects = _create_h2_objects(body_names, robot_type)
     soma_objects = _create_soma_meshes(data)
     frame_count = h2_body_q.shape[0]
     if preview_frames > 0:
         frame_count = min(frame_count, preview_frames)
 
-    meta = json.loads(str(data["metadata"]))
     stem = Path(meta["motion"]).stem
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -285,7 +295,7 @@ def _render_data_file(data_path, out_dir, width, height, fps, preview_frames=0):
         if frame == 0 or frame == frame_count - 1 or (frame + 1) % 10 == 0:
             print(f"[FRAME] {stem}: {frame + 1}/{frame_count}")
 
-    out_path = out_dir / f"{stem}__h2_newton_mesh.mp4"
+    out_path = out_dir / f"{stem}__{robot_type}_newton_mesh.mp4"
     cmd = [
         "ffmpeg",
         "-y",

@@ -16,6 +16,7 @@ class TargetType(IntEnum):
     """Enumeration of supported target model types."""
     UNITREE_G1 = auto()
     UNITREE_H2 = auto()
+    UNITREE_H2_SONIC = auto()
 
 _SOURCE_TYPE_TO_STR = {
     SourceType.SOMA : "soma"
@@ -25,6 +26,7 @@ _STR_TO_SOURCE_TYPE = {s : t for t, s in _SOURCE_TYPE_TO_STR.items()}
 _TARGET_TYPE_TO_STR = {
     TargetType.UNITREE_G1 : "unitree_g1",
     TargetType.UNITREE_H2 : "unitree_h2",
+    TargetType.UNITREE_H2_SONIC : "unitree_h2_sonic",
 }
 _STR_TO_TARGET_TYPE = {s : t for t, s in _TARGET_TYPE_TO_STR.items()}
 
@@ -139,6 +141,9 @@ def get_retargeter_config(source: SourceType, target: TargetType) -> dict:
     elif source == SourceType.SOMA and target == TargetType.UNITREE_H2:
         filename = 'soma_to_h2_retargeter_config.json'
         config_dir = 'unitree_h2'
+    elif source == SourceType.SOMA and target == TargetType.UNITREE_H2_SONIC:
+        filename = 'soma_to_h2_sonic_retargeter_config.json'
+        config_dir = 'unitree_h2_sonic'
     else:
         raise ValueError(f"Unknown source type [{source}] for target [{target}].")
 

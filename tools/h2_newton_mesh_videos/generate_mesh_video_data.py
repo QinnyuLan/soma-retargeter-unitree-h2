@@ -27,6 +27,7 @@ from soma_retargeter.utils.space_conversion_utils import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "outputs/h2_newton_videos/data"
+SUPPORTED_ROBOT_TYPES = ("unitree_h2", "unitree_h2_sonic")
 DEFAULT_MOTIONS = [
     REPO_ROOT / "assets/motions/bvh/Neutral_walk_forward_002__A057.bvh",
     REPO_ROOT / "assets/motions/bvh/high_jump_R_001__A277.bvh",
@@ -74,8 +75,8 @@ def _skin_source_mesh(renderer, skeleton_instance):
     return vertices
 
 
-def _make_h2_model():
-    target_builder = robot_model.create_robot_builder("unitree_h2")
+def _make_robot_model(robot_type):
+    target_builder = robot_model.create_robot_builder(robot_type)
     builder = newton.ModelBuilder()
     builder.add_builder(target_builder, wp.transform_identity())
     model = builder.finalize()
@@ -84,10 +85,10 @@ def _make_h2_model():
     return model, state, body_names
 
 
-def _retarget_motion(skeleton, animation):
+def _retarget_motion(skeleton, animation, robot_type):
     import soma_retargeter.pipelines.newton_pipeline as newton_pipeline
 
-    pipeline = newton_pipeline.NewtonPipeline(skeleton, "soma", "unitree_h2")
+    pipeline = newton_pipeline.NewtonPipeline(skeleton, "soma", robot_type)
     converter = SpaceConverter(get_facing_direction_type_from_str("Mujoco"))
     source_xform = converter.transform(wp.transform_identity())
     source_rot = wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat(*source_xform[3:7]))
@@ -95,9 +96,9 @@ def _retarget_motion(skeleton, animation):
     return pipeline.execute()[0], source_xform
 
 
-def _sample_motion(motion_path, out_path, fps, max_seconds=None):
+def _sample_motion(motion_path, out_path, fps, robot_type, max_seconds=None):
     skeleton, animation = bvh_utils.load_bvh(str(motion_path))
-    csv_buffer, source_xform = _retarget_motion(skeleton, animation)
+    csv_buffer, source_xform = _retarget_motion(skeleton, animation, robot_type)
 
     total_time = animation.num_frames / animation.sample_rate
     if max_seconds is not None:
@@ -105,7 +106,7 @@ def _sample_motion(motion_path, out_path, fps, max_seconds=None):
     sample_count = max(2, int(np.ceil(total_time * fps)))
     times = np.arange(sample_count, dtype=np.float32) / float(fps)
 
-    robot_model_state, state, body_names = _make_h2_model()
+    robot_model_state, state, body_names = _make_robot_model(robot_type)
     robot_offset = wp.transform(wp.vec3(0.0, -0.5, 0.0), wp.quat_identity())
     csv_buffer.xform = robot_offset
 
@@ -139,6 +140,7 @@ def _sample_motion(motion_path, out_path, fps, max_seconds=None):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     metadata = {
         "motion": str(motion_path),
+        "robot_type": robot_type,
         "fps": fps,
         "duration": total_time,
         "body_names": body_names,
@@ -159,10 +161,15 @@ def _sample_motion(motion_path, out_path, fps, max_seconds=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Retarget BVH motions to Unitree H2 and cache mesh poses for Blender video rendering.")
+        description="Retarget BVH motions to a Unitree H2 target and cache mesh poses for Blender video rendering.")
     parser.add_argument("--out-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--max-seconds", type=float, default=None)
+    parser.add_argument(
+        "--robot-type",
+        default="unitree_h2",
+        choices=SUPPORTED_ROBOT_TYPES,
+        help="Robot target to retarget and cache.")
     parser.add_argument("motions", nargs="*", default=[str(path) for path in DEFAULT_MOTIONS])
     args = parser.parse_args()
 
@@ -170,7 +177,7 @@ def main():
     for motion in args.motions:
         motion_path = Path(motion)
         out_path = out_dir / f"{motion_path.stem}.npz"
-        _sample_motion(motion_path, out_path, args.fps, args.max_seconds)
+        _sample_motion(motion_path, out_path, args.fps, args.robot_type, args.max_seconds)
 
 
 if __name__ == "__main__":

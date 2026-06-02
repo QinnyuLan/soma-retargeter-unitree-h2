@@ -5,7 +5,7 @@
 
 Convert [SOMA](https://github.com/NVlabs/SOMA-X) human motion captures into humanoid robot joint animation. Takes BVH motion files as input and produces robot-playable CSV joint data as output using GPU-optimized inverse kinematics via [Newton](https://github.com/newton-physics/newton) and high-performance computation with [NVIDIA Warp](https://github.com/NVIDIA/warp).
 
-The retargeting pipeline handles proportional human-to-robot scaling, multi-objective IK solving with joint limits, feet stabilization to maintain ground contact, and per-DOF joint limit clamping. Currently supports SOMA as the input skeleton and Unitree G1 (29 DOF) and Unitree H2 (31 DOF) as output robots. Additional robot targets are planned.
+The retargeting pipeline handles proportional human-to-robot scaling, multi-objective IK solving with joint limits, feet stabilization to maintain ground contact, and per-DOF joint limit clamping. Currently supports SOMA as the input skeleton and Unitree G1 (29 DOF), Unitree H2 (31 DOF), and the Sonic H2 training-asset variant (31 DOF) as output robots. Additional robot targets are planned.
 
 SOMA Retargeter is part of the [SOMA body model](https://github.com/NVlabs/SOMA-X) ecosystem for humanoid motion data.
 
@@ -18,11 +18,15 @@ This fork adds a functional Unitree H2 target on top of SOMA Retargeter:
 - Added local Unitree H2 robot assets, including MJCF, URDF, meshes, license notes, and packaging/LFS rules.
 - Added SOMA-to-H2 retargeting, scaling, and feet-stabilization configs under `soma_retargeter/configs/unitree_h2/`.
 - Added `assets/h2_bvh_to_csv_config.json` for H2 viewer and batch conversion workflows.
+- Added `unitree_h2_sonic`, a second H2 target using the H2 assets from the Sonic
+  training workspace, with separate assets, configs, and conversion entry point.
 - Added 31-DOF H2 CSV export matching the MuJoCo `qpos[7:]` joint order documented in `soma_retargeter/robot_assets/unitree_h2/JOINT_ORDER.md`.
-- Generalized the pipeline and viewer from a G1-only target path to explicit robot target selection for Unitree G1 and Unitree H2.
+- Generalized the pipeline and viewer from a G1-only target path to explicit robot target selection for Unitree G1, Unitree H2, and Sonic H2.
 - Added viewer startup options for loading BVH/CSV files directly and retargeting on launch, plus a separated default layout for comparing SOMA and H2 motion.
+- Added light head/neck retargeting for the Sonic H2 target so `head_pitch` and
+  `head_yaw` are driven by SOMA `Neck1` rotation instead of staying fixed.
 
-The current H2 parameters are intended for visualization and offline CSV generation. Before hardware deployment, verify joint order, joint signs, command units, limits, and controller expectations against the target robot stack.
+The current H2 and Sonic H2 parameters are intended for visualization and offline CSV generation. Before hardware deployment, verify joint order, joint signs, command units, limits, and controller expectations against the target robot stack.
 
 ## Requirements
 
@@ -126,6 +130,12 @@ For Unitree H2 export, use the H2 config:
 python ./app/bvh_to_csv_converter.py --config ./assets/h2_bvh_to_csv_config.json --viewer null
 ```
 
+For the Sonic H2 training-asset variant, use:
+
+```bash
+python ./app/bvh_to_csv_converter.py --config ./assets/h2_sonic_bvh_to_csv_config.json --viewer null
+```
+
 ## Unitree H2 Support
 
 Unitree H2 support includes a local MJCF model, mesh assets, 31-DOF CSV output order, SOMA-to-H2 retargeting settings, human-to-robot scaling, and feet stabilization. The H2 assets live under `soma_retargeter/robot_assets/unitree_h2/` and are distributed under Unitree Robotics' BSD 3-Clause license included in that directory.
@@ -143,6 +153,70 @@ python ./app/bvh_to_csv_converter.py \
 ```
 
 ![Interactive H2 viewer interface](assets/docs/interactive_viewer_h2.gif)
+
+### H2 Sonic Training Assets
+
+`unitree_h2_sonic` uses the H2 robot description from the local Sonic training
+workspace:
+
+`/home/sky/workspace/GR00T-WholeBodyControl-UnitreeH2-FT/gear_sonic/data/assets/robot_description`
+
+The copied assets live under `soma_retargeter/robot_assets/unitree_h2_sonic/`.
+The retargeter configs live under `soma_retargeter/configs/unitree_h2_sonic/`,
+and `assets/h2_sonic_bvh_to_csv_config.json` selects this target for viewer and
+batch conversion runs.
+
+To open the viewer directly with the Sonic H2 target:
+
+```bash
+python ./app/bvh_to_csv_converter.py \
+  --config ./assets/h2_sonic_bvh_to_csv_config.json \
+  --viewer gl \
+  --bvh assets/motions/bvh/dance_hiphop_shuffle_square_R_fast_002__A318.bvh \
+  --retarget-on-load
+```
+
+To retarget the full SEED BVH tree with the tuned Sonic H2 parameters, use the
+resume-friendly sharded exporter. This command writes only the new Sonic H2
+dataset and leaves existing datasets untouched:
+
+```bash
+ROOT=/mnt/data/seed/h2_sonic_full
+IMPORT_ROOT=/mnt/data/seed/soma_uniform/bvh
+NUM_SHARDS=4
+BATCH_SIZE=32
+
+mkdir -p "$ROOT/csv" "$ROOT/logs"
+
+for shard in $(seq 0 $((NUM_SHARDS - 1))); do
+  CUDA_VISIBLE_DEVICES=0 uv run python tools/dataset_export/batch_bvh_to_csv.py \
+    --import-root "$IMPORT_ROOT" \
+    --export-root "$ROOT/csv" \
+    --robot-type unitree_h2_sonic \
+    --num-shards "$NUM_SHARDS" \
+    --shard-index "$shard" \
+    --batch-size "$BATCH_SIZE" \
+    --device cuda:0 \
+    --progress "$ROOT/logs/progress_${shard}.csv" \
+    --failures "$ROOT/logs/failures_${shard}.csv" \
+    > "$ROOT/logs/shard_${shard}.log" 2>&1 &
+done
+
+wait
+```
+
+The exporter sorts clips by size before round-robin sharding so long motions are
+balanced across workers. It mirrors the input folder structure under
+`$ROOT/csv`, skips non-empty existing CSVs on rerun, and records per-shard
+progress and failures under `$ROOT/logs`.
+
+The Sonic H2 output uses the same 31-DOF CSV column layout as the base H2
+target. Its MuJoCo `qpos[7:]` and actuator order are documented in
+`soma_retargeter/robot_assets/unitree_h2_sonic/JOINT_ORDER.md`. Compared with
+the base H2 target, the Sonic config lightly tracks SOMA `Neck1` rotation through
+`head_yaw_link` (`r_weight = 0.35`, `t_weight = 0.0`) and smooths both head
+links with a low mask (`0.2`). This keeps the head DOFs active without letting
+head position pull the torso or arms.
 
 ### H2 Mesh Video Export
 
@@ -175,6 +249,13 @@ Most H2 retargeting behavior is controlled by JSON configs:
 - `soma_retargeter/configs/unitree_h2/soma_to_h2_retargeter_config.json`: IK iterations, joint limit/smoothing weights, post-processing, and per-body IK target weights.
 - `soma_retargeter/configs/unitree_h2/soma_to_h2_scaler_config.json`: body-part scale factors and per-joint target offsets from SOMA into the H2 tracking frame.
 - `soma_retargeter/configs/unitree_h2/h2_feet_stabilizer_config.json`: post-process foot stabilization weights and two-bone leg IK hints.
+
+The Sonic H2 equivalents are under `soma_retargeter/configs/unitree_h2_sonic/`.
+The selected Sonic parameters keep the tuned H2 pelvis, limb, foot, and smoothing
+settings, then add the low-weight neck/head target described above. On five
+representative sample motions, this preserved the H2 tracking baseline while
+adding about 16 degrees of average head-pitch range and 15 degrees of average
+head-yaw range.
 
 Useful first adjustments:
 

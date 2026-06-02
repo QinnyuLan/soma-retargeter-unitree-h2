@@ -122,7 +122,7 @@ class UnitreeH231DOF_CSVConfig:
 def get_csv_config(robot_type: str) -> RobotCSVConfig:
     if robot_type == "unitree_g1":
         return UnitreeG129DOF_CSVConfig()
-    if robot_type == "unitree_h2":
+    if robot_type in ("unitree_h2", "unitree_h2_sonic"):
         return UnitreeH231DOF_CSVConfig()
 
     raise ValueError(f"[ERROR]: Unknown CSV robot type [{robot_type}]")
