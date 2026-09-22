@@ -507,6 +507,28 @@
   </joint>
 
 
+  <!-- camera -->
+  <link name="camera"></link>
+  <joint name="camera" type="fixed">
+    <origin xyz="0.08667 0.03 0.0099" rpy="0 0 0"/>
+    <parent link="head_yaw_link"/>
+    <child link="camera"/>
+  </joint>
+  <!-- imu -->
+  <link name="imu_in_torso"></link>
+  <joint name="imu_in_torso_joint" type="fixed">
+    <origin xyz="-0.06382 -0.06538 0.29588" rpy="0 0 0"/>
+    <parent link="torso_link"/>
+    <child link="imu_in_torso"/>
+  </joint>
+  <link name="imu_in_pelvis"></link>
+  <joint name="imu_in_pelvis_joint" type="fixed">
+    <origin xyz="-0.055 0 -0.0589" rpy="0 0 0"/>
+    <parent link="pelvis"/>
+    <child link="imu_in_pelvis"/>
+  </joint>
+
+
   <!-- ARM -->
   <link name="left_shoulder_pitch_link">
     <inertial>

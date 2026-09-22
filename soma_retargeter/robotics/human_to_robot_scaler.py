@@ -19,6 +19,14 @@ class HumanToRobotScaler:
         self.robot_type = config['robot_type']
         self.skeleton = skeleton
 
+        position_scale_mode = config.get('position_scale_mode', 'geocentric')
+        if position_scale_mode not in ('geocentric', 'hierarchical'):
+            raise ValueError(
+                "position_scale_mode must be either 'geocentric' or 'hierarchical', "
+                f"got {position_scale_mode!r}"
+            )
+        self.position_scale_mode = position_scale_mode
+
         ratio = human_height / config['human_height_assumption']
         joint_scales = config['joint_scales']
         for key in joint_scales.keys():
@@ -44,6 +52,7 @@ class HumanToRobotScaler:
         self.mapped_joint_parents = [
             -1 if joint_parents[name] == "" else self.mapped_joints.index(joint_parents[name])
             for name in self.mapped_joints]
+        self.wp_mapped_joint_parents = wp.array(self.mapped_joint_parents, dtype=wp.int32)
 
     def effector_names(self):
         """
@@ -77,33 +86,9 @@ class HumanToRobotScaler:
         if skeleton_instance.skeleton != self.skeleton:
             raise ValueError("[ERROR]: SkeletonInstance.skeleton is not equal to self.skeleton.")
 
-        @wp.kernel
-        def compute_global_pose_kernel(
-            in_num_joints     : wp.int32,
-            in_root_tx        : wp.transform,
-            in_parent_indices : wp.array(dtype=wp.int32),
-            in_local_pose     : wp.array(dtype=wp.transform),
-            out_result        : wp.array(dtype=wp.transform)
-        ):
-            pose_utils.wp_compute_global_pose(in_num_joints, in_root_tx, in_parent_indices, in_local_pose, out_result)
-
-        @wp.kernel
-        def compute_scaled_effectors_kernel(
-            in_num_mapped_joints    : wp.int32,
-            in_global_pose          : wp.array(dtype=wp.transform),
-            in_mapped_joint_indices : wp.array(dtype=wp.int32),
-            in_mapped_joint_scales  : wp.array(dtype=wp.float32),
-            in_mapped_joint_offsets : wp.array(dtype=wp.transform),
-            in_scale_animation      : wp.bool,
-            out_result              : wp.array(dtype=wp.transform)
-        ):
-            HumanToRobotScaler.wp_compute_scaled_effectors(
-                in_num_mapped_joints, in_global_pose, in_mapped_joint_indices,
-                in_mapped_joint_scales, in_mapped_joint_offsets, in_scale_animation, out_result)
-
         wp_global_pose = wp.array([wp.transform_identity()] * skeleton_instance.num_joints, dtype=wp.transform)
         wp.launch(
-            compute_global_pose_kernel,
+            _compute_global_pose_kernel,
             dim=1,
             inputs=[
                 skeleton_instance.num_joints,
@@ -114,14 +99,16 @@ class HumanToRobotScaler:
 
         wp_effectors = wp.array([wp.transform_identity()] * len(self.mapped_joint_indices), dtype=wp.transform)
         wp.launch(
-            compute_scaled_effectors_kernel,
+            _compute_scaled_effectors_kernel,
             dim=1,
             inputs=[
                 len(self.mapped_joint_indices),
                 wp_global_pose,
                 self.mapped_joint_indices,
+                self.wp_mapped_joint_parents,
                 self.mapped_joint_scales,
                 self.mapped_joint_offsets,
+                self.position_scale_mode == 'hierarchical',
                 scale_animation
             ],
             outputs=[wp_effectors])
@@ -151,36 +138,9 @@ class HumanToRobotScaler:
         if animation_buffer.skeleton != self.skeleton:
             raise ValueError("[ERROR]: AnimationBuffer.skeleton is not equal to self.skeleton.")
 
-        @wp.kernel
-        def batched_compute_global_pose_kernel(
-            in_num_joints     : wp.int32,
-            in_root_tx        : wp.transform,
-            in_parent_indices : wp.array(dtype=wp.int32),
-            in_local_pose     : wp.array2d(dtype=wp.transform),
-            out_result        : wp.array2d(dtype=wp.transform)
-        ):
-            frame_idx = wp.tid()
-            pose_utils.wp_compute_global_pose(
-                in_num_joints, in_root_tx, in_parent_indices, in_local_pose[frame_idx], out_result[frame_idx])
-
-        @wp.kernel
-        def batched_compute_scaled_effectors_2d_kernel(
-            in_num_mapped_joints    : wp.int32,
-            in_global_pose          : wp.array2d(dtype=wp.transform),
-            in_mapped_joint_indices : wp.array(dtype=wp.int32),
-            in_mapped_joint_scales  : wp.array(dtype=wp.float32),
-            in_mapped_joint_offsets : wp.array(dtype=wp.transform),
-            in_scale_animation      : wp.bool,
-            out_result              : wp.array2d(dtype=wp.transform)
-        ):
-            frame_idx = wp.tid()
-            HumanToRobotScaler.wp_compute_scaled_effectors(
-               in_num_mapped_joints, in_global_pose[frame_idx], in_mapped_joint_indices,
-               in_mapped_joint_scales, in_mapped_joint_offsets, in_scale_animation, out_result[frame_idx])
-
         wp_global_poses = wp.empty(shape=(animation_buffer.num_frames, self.skeleton.num_joints), dtype=wp.transform)
         wp.launch(
-            batched_compute_global_pose_kernel,
+            _batched_compute_global_pose_kernel,
             dim=animation_buffer.num_frames,
             inputs=[
                 self.skeleton.num_joints,
@@ -191,14 +151,16 @@ class HumanToRobotScaler:
 
         wp_effectors = wp.empty(shape=(animation_buffer.num_frames, len(self.mapped_joint_indices)), dtype=wp.transform)
         wp.launch(
-            batched_compute_scaled_effectors_2d_kernel,
+            _batched_compute_scaled_effectors_2d_kernel,
             dim=animation_buffer.num_frames,
             inputs=[
                 len(self.mapped_joint_indices),
                 wp_global_poses,
                 self.mapped_joint_indices,
+                self.wp_mapped_joint_parents,
                 self.mapped_joint_scales,
                 self.mapped_joint_offsets,
+                self.position_scale_mode == 'hierarchical',
                 scale_animation
             ],
             outputs=[wp_effectors])
@@ -246,8 +208,10 @@ class HumanToRobotScaler:
         in_num_mapped_joints    : wp.int32,
         in_global_pose          : wp.array(dtype=wp.transform),
         in_mapped_joint_indices : wp.array(dtype=wp.int32),
+        in_mapped_joint_parents : wp.array(dtype=wp.int32),
         in_mapped_joint_scales  : wp.array(dtype=wp.float32),
         in_mapped_joint_offsets : wp.array(dtype=wp.transform),
+        in_hierarchical_scaling : wp.bool,
         in_scale_animation      : wp.bool,
         out_result              : wp.array(dtype=wp.transform)
     ):
@@ -262,8 +226,78 @@ class HumanToRobotScaler:
             offset_tx = in_mapped_joint_offsets[i]
 
             scale = wp.where(in_scale_animation, wp.vec3(in_mapped_joint_scales[i]), wp.vec3(1.0, 1.0, in_mapped_joint_scales[i]))
-            geocentric_scaled_t = wp.cw_mul((pose_tx.p - root_t), scale)
-
             q = wp.mul(pose_tx.q, offset_tx.q)
-            t = geocentric_scaled_t + scaled_root_t + wp.quat_rotate(q, offset_tx.p)
+
+            base_t = scaled_root_t + wp.cw_mul((pose_tx.p - root_t), scale)
+            parent = in_mapped_joint_parents[i]
+            if in_hierarchical_scaling and parent >= 0:
+                parent_idx = in_mapped_joint_indices[parent]
+                parent_pose_tx = in_global_pose[parent_idx]
+                parent_offset_tx = in_mapped_joint_offsets[parent]
+                parent_q = wp.mul(parent_pose_tx.q, parent_offset_tx.q)
+                parent_base_t = out_result[parent].p - wp.quat_rotate(parent_q, parent_offset_tx.p)
+                base_t = parent_base_t + wp.cw_mul(pose_tx.p - parent_pose_tx.p, scale)
+
+            t = base_t + wp.quat_rotate(q, offset_tx.p)
             out_result[i] = wp.transform(t, q)
+
+
+@wp.kernel
+def _compute_global_pose_kernel(
+    in_num_joints     : wp.int32,
+    in_root_tx        : wp.transform,
+    in_parent_indices : wp.array(dtype=wp.int32),
+    in_local_pose     : wp.array(dtype=wp.transform),
+    out_result        : wp.array(dtype=wp.transform)
+):
+    pose_utils.wp_compute_global_pose(in_num_joints, in_root_tx, in_parent_indices, in_local_pose, out_result)
+
+
+@wp.kernel
+def _compute_scaled_effectors_kernel(
+    in_num_mapped_joints    : wp.int32,
+    in_global_pose          : wp.array(dtype=wp.transform),
+    in_mapped_joint_indices : wp.array(dtype=wp.int32),
+    in_mapped_joint_parents : wp.array(dtype=wp.int32),
+    in_mapped_joint_scales  : wp.array(dtype=wp.float32),
+    in_mapped_joint_offsets : wp.array(dtype=wp.transform),
+    in_hierarchical_scaling : wp.bool,
+    in_scale_animation      : wp.bool,
+    out_result              : wp.array(dtype=wp.transform)
+):
+    HumanToRobotScaler.wp_compute_scaled_effectors(
+        in_num_mapped_joints, in_global_pose, in_mapped_joint_indices,
+        in_mapped_joint_parents, in_mapped_joint_scales, in_mapped_joint_offsets,
+        in_hierarchical_scaling, in_scale_animation, out_result)
+
+
+@wp.kernel
+def _batched_compute_global_pose_kernel(
+    in_num_joints     : wp.int32,
+    in_root_tx        : wp.transform,
+    in_parent_indices : wp.array(dtype=wp.int32),
+    in_local_pose     : wp.array2d(dtype=wp.transform),
+    out_result        : wp.array2d(dtype=wp.transform)
+):
+    frame_idx = wp.tid()
+    pose_utils.wp_compute_global_pose(
+        in_num_joints, in_root_tx, in_parent_indices, in_local_pose[frame_idx], out_result[frame_idx])
+
+
+@wp.kernel
+def _batched_compute_scaled_effectors_2d_kernel(
+    in_num_mapped_joints    : wp.int32,
+    in_global_pose          : wp.array2d(dtype=wp.transform),
+    in_mapped_joint_indices : wp.array(dtype=wp.int32),
+    in_mapped_joint_parents : wp.array(dtype=wp.int32),
+    in_mapped_joint_scales  : wp.array(dtype=wp.float32),
+    in_mapped_joint_offsets : wp.array(dtype=wp.transform),
+    in_hierarchical_scaling : wp.bool,
+    in_scale_animation      : wp.bool,
+    out_result              : wp.array2d(dtype=wp.transform)
+):
+    frame_idx = wp.tid()
+    HumanToRobotScaler.wp_compute_scaled_effectors(
+        in_num_mapped_joints, in_global_pose[frame_idx], in_mapped_joint_indices,
+        in_mapped_joint_parents, in_mapped_joint_scales, in_mapped_joint_offsets,
+        in_hierarchical_scaling, in_scale_animation, out_result[frame_idx])

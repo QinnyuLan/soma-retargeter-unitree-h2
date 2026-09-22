@@ -328,27 +328,59 @@ class BVHImporter(object):
                 motionLine = i
                 break
 
-        # parse motion data
+        # Parse the motion block as one contiguous matrix. Keeping every
+        # channel value as a Python float is prohibitively expensive for large
+        # dataset exports.
         frametime = 0
+        declared_frames = None
+        motion_lines = []
+        channel_count = sum(joint.channel_number for joint in joints)
         for i, line in enumerate(data[motionLine:]):
             token = line.split()
             if not token:
                 continue
 
             # Motion
-            if token[0] in ['MOTION', 'Frames:']:
+            if token[0] == 'MOTION':
                 continue
+            elif token[0] == 'Frames:':
+                declared_frames = int(token[-1])
             elif ' '.join(token[:2]) == 'Frame Time:':
                 frametime = float(token[-1])
             else:
-                data = [float(strVal) for strVal in token]
-                start = 0
-                end = 0
-                for jnt in joints:
-                    end += jnt.channel_number
-                    jnt.add_frame_animation(data[start:end])
-                    jnt.frame_time = frametime
-                    start += jnt.channel_number
+                if len(token) != channel_count:
+                    raise ValueError(
+                        f"BVH motion row has {len(token)} channels, expected "
+                        f"{channel_count}: {file_path}"
+                    )
+                motion_lines.append(line)
+
+        if frametime <= 0.0:
+            raise ValueError(f"BVH has invalid or missing frame time: {file_path}")
+        if declared_frames is not None and declared_frames != len(motion_lines):
+            raise ValueError(
+                f"BVH declares {declared_frames} frames but contains "
+                f"{len(motion_lines)}: {file_path}"
+            )
+
+        if motion_lines:
+            motion_data = np.fromstring(''.join(motion_lines), sep=' ', dtype=np.float32)
+            expected_values = len(motion_lines) * channel_count
+            if motion_data.size != expected_values:
+                raise ValueError(
+                    f"BVH motion block has {motion_data.size} values, expected "
+                    f"{expected_values}: {file_path}"
+                )
+            motion_data = motion_data.reshape(len(motion_lines), channel_count)
+        else:
+            motion_data = np.empty((0, channel_count), dtype=np.float32)
+
+        start = 0
+        for joint in joints:
+            end = start + joint.channel_number
+            joint._animation = motion_data[:, start:end]
+            joint.frame_time = frametime
+            start = end
 
         return joints[0]
 
@@ -440,44 +472,74 @@ class BVHImporter(object):
         # Load animation
         actual_frame_range = cls.get_frame_range(BVHJoint)
 
-        frame_data = []
-
-        positions_array = []
-        rotations_array = []
-        joint_indices = []
-        rotate_orders = []
-
         start_time = time.time()
-        for frame in range(actual_frame_range[0]):
-            positions_array.append([])
-            rotations_array.append([])
-            cls.load_frame_animation_data(skeleton, BVHJoint, frame, positions_array[-1], rotations_array[-1], joint_indices, rotate_orders)
+        joints = []
+
+        def collect(joint):
+            joints.append(joint)
+            for child in joint.children:
+                collect(child)
+
+        collect(BVHJoint)
+        num_frames = actual_frame_range[0]
+        num_joints = len(joints)
+        joint_indices = [skeleton.joint_names.index(joint.name) for joint in joints]
+        rotate_orders = [joint.rotate_order for joint in joints]
+
+        positions_array_np = np.zeros((num_frames, num_joints, 3), dtype=np.float32)
+        rotations_array_np = np.zeros((num_frames, num_joints, 3), dtype=np.float32)
+        positions_by_joint = np.zeros(num_joints, dtype=np.bool_)
+        rotations_by_joint = np.zeros(num_joints, dtype=np.bool_)
+        for joint_index, joint in enumerate(joints):
+            position_channels = [
+                index
+                for index, channel in enumerate(joint.channels)
+                if 'position' in channel
+            ]
+            rotation_channels = [
+                index
+                for index, channel in enumerate(joint.channels)
+                if 'rotation' in channel
+            ]
+            if len(position_channels) > 3 or len(rotation_channels) > 3:
+                raise ValueError(
+                    f"BVH joint has more than three position or rotation channels: "
+                    f"{joint.name}"
+                )
+            if position_channels:
+                positions_by_joint[joint_index] = True
+                positions_array_np[:, joint_index, :len(position_channels)] = (
+                    joint.animation[:, position_channels]
+                )
+            if rotation_channels:
+                rotations_by_joint[joint_index] = True
+                rotations_array_np[:, joint_index, :len(rotation_channels)] = (
+                    joint.animation[:, rotation_channels]
+                )
         end_time = time.time()
         cls.animation_load_time += end_time - start_time
 
         start_time = time.time()
-        positions_exists = [len(positions_array[frame][joint_index]) > 0 for frame in range(len(positions_array)) for joint_index in range(len(joint_indices))]
-        positions_exists = np.array(positions_exists).reshape(len(positions_array), len(joint_indices))
-        rotations_exists = [len(rotations_array[frame][joint_index]) > 0 for frame in range(len(rotations_array)) for joint_index in range(len(joint_indices))]
-        rotations_exists = np.array(rotations_exists).reshape(len(rotations_array), len(joint_indices))
+        positions_exists = np.broadcast_to(
+            positions_by_joint, (num_frames, num_joints)
+        ).copy()
+        rotations_exists = np.broadcast_to(
+            rotations_by_joint, (num_frames, num_joints)
+        ).copy()
 
-        frame_data_wp = wp.empty(shape=(actual_frame_range[0], len(joint_indices)), dtype=wp.transform)
+        frame_data_wp = wp.empty(shape=(num_frames, num_joints), dtype=wp.transform)
         rotate_order_np = np.zeros((len(joint_indices), 3), dtype=np.int32)
         for i, rotate_order in enumerate(rotate_orders):
+            if len(rotate_order) not in (0, 3):
+                raise ValueError(
+                    f"BVH joint rotation must have zero or three channels: "
+                    f"{joints[i].name}"
+                )
             for a in range(3):
-                rotate_order_np[i][a] = 0 if rotate_order[a] == 'x' else 1 if rotate_order[a] == 'y' else 2
+                if rotate_order:
+                    rotate_order_np[i][a] = 0 if rotate_order[a] == 'x' else 1 if rotate_order[a] == 'y' else 2
 
         reference_local_transforms_wp = wp.array(skeleton.reference_local_transforms, dtype=wp.transform)
-        positions_array_np = np.zeros((len(positions_array), len(joint_indices), 3), dtype=np.float32)
-        rotations_array_np = np.zeros((len(rotations_array), len(joint_indices), 3), dtype=np.float32)
-
-        for frame in range(len(positions_array)):
-            for joint_index in range(len(joint_indices)):
-                if len(positions_array[frame][joint_index]) > 0:
-                    positions_array_np[frame][joint_index] = positions_array[frame][joint_index]
-
-                if len(rotations_array[frame][joint_index]) > 0:
-                    rotations_array_np[frame][joint_index] = rotations_array[frame][joint_index]
 
         wp.launch(
             wp_convert_frame_animation,

@@ -2,6 +2,7 @@
   "robot_type": "unitree_h2",
   "human_root_name": "Hips",
   "human_height_assumption": 1.8,
+  "position_scale_mode": "hierarchical",
   "joint_scales": {
       "Hips": 1.05,
       "Chest": 1.0,
@@ -18,12 +19,12 @@
       "LeftToeBase": 1.09,
       "RightToeBase": 1.09,
 
-      "LeftArm": 0.82,
-      "RightArm": 0.82,
-      "LeftForeArm": 0.82,
-      "RightForeArm": 0.82,
-      "LeftHand": 0.82,
-      "RightHand": 0.82
+      "LeftArm": 1.24,
+      "RightArm": 1.24,
+      "LeftForeArm": 0.98,
+      "RightForeArm": 0.98,
+      "LeftHand": 0.88,
+      "RightHand": 0.88
     },
   "joint_parents": {
       "Hips": "",
@@ -60,7 +61,7 @@
             [0.5, -0.5, -0.5, 0.5]
         ],
         "LeftFoot": [
-            [-0.017, 0.04, -0.027],
+            [0.043, 0.04, -0.027],
             [0.695, -0.128, -0.128, 0.695]
         ],
         "LeftToe": [
@@ -80,7 +81,7 @@
             [0.5, 0.5, 0.5, 0.5]
         ],
         "RightFoot": [
-            [-0.017, -0.04, -0.027],
+            [0.043, -0.04, -0.027],
             [0.128, 0.695, 0.695, 0.128]
         ],
         "RightToe": [

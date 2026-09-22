@@ -2,15 +2,54 @@
     "robot_type": "unitree_h2",
     "ik_iterations": 20,
     "joint_limit_weight": 10.0,
+    "center_of_mass_weight": 48.0,
+
+    "ground_contact_foot_rotation": {
+        "enabled": true,
+        "full_height_margin_m": 0.025,
+        "release_height_margin_m": 0.06,
+        "target_height_m": 0.001,
+        "full_horizontal_speed_mps": 0.02,
+        "release_horizontal_speed_mps": 0.08,
+        "full_tilt_deg": 12.0,
+        "release_tilt_deg": 35.0,
+        "minimum_swing_height_m": 0.04,
+        "root_drop_m": 0.0,
+        "detection_smoothing_sigma_frames": 2.0,
+        "temporal_smoothing_sigma_frames": 2.0,
+        "target_clearance_m": 0.001,
+        "support_vertices_local_m": [
+            [
+                [-0.076, 0.0049, 0.0007],
+                [-0.076, 0.0704, 0.0007],
+                [0.1441, 0.0049, 0.0007],
+                [0.1441, 0.0704, 0.0007]
+            ],
+            [
+                [-0.076, -0.0704, 0.0007],
+                [-0.076, -0.0049, 0.0007],
+                [0.1441, -0.0704, 0.0007],
+                [0.1441, -0.0049, 0.0007]
+            ]
+        ]
+    },
 
     "effectors": {
         "pelvis"               : [28.0,  6.0],
         "left_hip_roll_link"   : [1.5 , 0.15],
         "left_knee_link"       : [1.0 ,  1.0],
-        "left_sole_link"       : [ 8.0,  1.4],
+        "left_sole_link"       : [48.0,  1.4],
         "right_hip_roll_link"  : [1.5 , 0.15],
         "right_knee_link"      : [1.0 ,  1.0],
-        "right_sole_link"      : [ 8.0,  1.4]
+        "right_sole_link"      : [48.0,  1.4]
+    },
+
+    "deep_knee_root_lift": {
+        "enabled": false,
+        "start_deg": 132.0,
+        "full_deg": 144.0,
+        "smoothing_alpha": 0.15,
+        "max_lift_m": 0.06
     },
 
     "ik_root": 0,

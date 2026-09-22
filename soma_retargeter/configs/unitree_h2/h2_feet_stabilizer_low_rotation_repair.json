@@ -1,0 +1,56 @@
+{
+    "robot_type": "unitree_h2",
+    "ik_iterations": 20,
+    "joint_limit_weight": 10.0,
+
+    "effectors": {
+        "pelvis": [28.0, 6.0],
+        "left_hip_roll_link": [1.5, 0.15],
+        "left_knee_link": [1.0, 1.0],
+        "left_sole_link": [24.0, 2.0],
+        "right_hip_roll_link": [1.5, 0.15],
+        "right_knee_link": [1.0, 1.0],
+        "right_sole_link": [24.0, 2.0]
+    },
+
+    "ground_contact_foot_rotation": {
+        "enabled": true,
+        "full_height_margin_m": 0.035,
+        "release_height_margin_m": 0.08,
+        "full_horizontal_speed_mps": 0.03,
+        "release_horizontal_speed_mps": 0.08,
+        "temporal_smoothing_sigma_frames": 4.0,
+        "minimum_swing_height_m": 0.09,
+        "target_height_m": 0.001,
+        "root_drop_m": 0.0
+    },
+
+    "deep_knee_root_lift": {
+        "enabled": true,
+        "start_deg": 136.0,
+        "full_deg": 148.0,
+        "smoothing_alpha": 0.15,
+        "max_lift_m": 0.06
+    },
+
+    "minimum_knee_bend": {
+        "enabled": true,
+        "target_deg": 3.0,
+        "transition_deg": 2.0,
+        "weight": 0.5
+    },
+
+    "ik_root": 0,
+    "ik_limbs": {
+        "left_leg": {
+            "effectors": [1, 2, 3],
+            "hint_reference": 3,
+            "hint_offset": [0.25, 0.0, 0.25]
+        },
+        "right_leg": {
+            "effectors": [4, 5, 6],
+            "hint_reference": 6,
+            "hint_offset": [0.25, 0.0, 0.25]
+        }
+    }
+}

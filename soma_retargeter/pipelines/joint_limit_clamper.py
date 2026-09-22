@@ -5,6 +5,25 @@ import warp as wp
 import numpy as np
 
 
+@wp.kernel
+def _clamp_to_joint_limits_kernel(
+    in_joint_limit_lower: wp.array1d(dtype=wp.float32),
+    in_joint_limit_upper: wp.array1d(dtype=wp.float32),
+    in_dof_to_coord: wp.array1d(dtype=wp.int32),
+    inout_joint_q: wp.array2d(dtype=wp.float32),
+):
+    env, dof_idx = wp.tid()
+    coord_idx = in_dof_to_coord[dof_idx]
+    if coord_idx < 0:
+        return
+
+    inout_joint_q[env, coord_idx] = wp.clamp(
+        inout_joint_q[env, coord_idx],
+        in_joint_limit_lower[dof_idx],
+        in_joint_limit_upper[dof_idx],
+    )
+
+
 class JointLimitClamper:
     """
     A utility class for clamping joint coordinates to their specified limits.
@@ -44,25 +63,8 @@ class JointLimitClamper:
         if joint_q.shape[1] != self.n_coords:
             raise ValueError(f"[ERROR]: joint_q size mismatch. Expected joint_q shape of [{joint_q.shape[0]}, {self.n_coords}] but received [{joint_q.shape}]")
 
-        @wp.kernel
-        def clamp_to_joint_limits_kernel(
-            in_joint_limit_lower : wp.array1d(dtype=wp.float32),  # (n_dofs)
-            in_joint_limit_upper : wp.array1d(dtype=wp.float32),  # (n_dofs)
-            in_dof_to_coord      : wp.array1d(dtype=wp.int32),    # (n_dofs)
-            inout_joint_q        : wp.array2d(dtype=wp.float32)   # (n_batch, n_coords)
-        ):
-            env, dof_idx = wp.tid()
-            coord_idx = in_dof_to_coord[dof_idx]
-            if coord_idx < 0:
-                return
-
-            inout_joint_q[env, coord_idx] = wp.clamp(
-                inout_joint_q[env, coord_idx],
-                in_joint_limit_lower[dof_idx],
-                in_joint_limit_upper[dof_idx])
-
         wp.launch(
-            clamp_to_joint_limits_kernel,
+            _clamp_to_joint_limits_kernel,
             dim=[joint_q.shape[0], self.n_dofs],
             inputs=[
                 self.joint_limit_lower,

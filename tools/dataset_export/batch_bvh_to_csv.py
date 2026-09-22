@@ -3,8 +3,11 @@
 
 import argparse
 import csv
+import json
+import os
 import time
 from pathlib import Path
+from typing import Sequence
 
 import warp as wp
 
@@ -15,6 +18,9 @@ from soma_retargeter.utils.space_conversion_utils import (
     SpaceConverter,
     get_facing_direction_type_from_str,
 )
+
+
+PLANNED_RECYCLE_EXIT_CODE = 75
 
 
 def _elapsed(seconds: float) -> str:
@@ -56,7 +62,12 @@ def _run_batch(
     for path, buffer in zip(paths, buffers):
         dst_path = export_root / path.relative_to(import_root).with_suffix(".csv")
         dst_path.parent.mkdir(parents=True, exist_ok=True)
-        csv_utils.save_csv(str(dst_path), buffer, csv_config=csv_config)
+        tmp_path = dst_path.with_name(f".{dst_path.name}.tmp.{os.getpid()}")
+        try:
+            csv_utils.save_csv(str(tmp_path), buffer, csv_config=csv_config)
+            tmp_path.replace(dst_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
     return len(buffers)
 
 
@@ -172,11 +183,37 @@ def _collect_paths(
     return pending, skipped, missing, pre_shard_count
 
 
-def main() -> None:
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return parsed
+
+
+def _planned_recycle_due(
+    batch_idx: int,
+    max_batches_per_process: int,
+    next_pending_index: int,
+    total_pending: int,
+) -> bool:
+    return (
+        max_batches_per_process > 0
+        and batch_idx >= max_batches_per_process
+        and next_pending_index < total_pending
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Resume-friendly batch BVH to robot CSV exporter.")
     parser.add_argument("--import-root", type=Path, required=True)
     parser.add_argument("--export-root", type=Path, required=True)
     parser.add_argument("--robot-type", default="unitree_h2_sonic")
+    parser.add_argument(
+        "--retarget-config",
+        type=Path,
+        default=None,
+        help="Optional JSON retarget config override; the selected robot asset still comes from --robot-type.",
+    )
     parser.add_argument("--retarget-source", default="soma")
     parser.add_argument("--source-facing-direction", default="Mujoco")
     parser.add_argument("--batch-size", type=int, default=32)
@@ -189,7 +226,18 @@ def main() -> None:
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--progress", type=Path, default=None)
     parser.add_argument("--failures", type=Path, default=None)
-    args = parser.parse_args()
+    parser.add_argument("--pipeline-progress", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--max-batches-per-process",
+        type=_nonnegative_int,
+        default=0,
+        help="exit with code 75 at a completed batch boundary after N batches; 0 disables recycling",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     import_root = args.import_root.resolve()
     export_root = args.export_root.resolve()
@@ -210,6 +258,12 @@ def main() -> None:
     total_pending = len(paths)
     print(f"[INFO] import_root={import_root}", flush=True)
     print(f"[INFO] export_root={export_root}", flush=True)
+    retarget_config = None
+    if args.retarget_config is not None:
+        retarget_config_path = args.retarget_config.resolve()
+        with retarget_config_path.open(encoding="utf-8") as f:
+            retarget_config = json.load(f)
+        print(f"[INFO] retarget_config={retarget_config_path}", flush=True)
     if args.manifest_csv is not None:
         print(
             f"[INFO] manifest={args.manifest_csv.resolve()} column={args.manifest_path_column} "
@@ -225,7 +279,7 @@ def main() -> None:
         _append_row(failures_path, ["path", "error"], {"path": relpath, "error": "missing_manifest_path"})
     if not paths:
         print("[OK] no pending BVH files", flush=True)
-        return
+        return 0
 
     bvh_importer = bvh_utils.BVHImporter()
     skeleton, _ = bvh_importer.create_skeleton(paths[0])
@@ -237,7 +291,13 @@ def main() -> None:
     failed_load = 0
     started = time.time()
     with wp.ScopedDevice(args.device):
-        pipeline = newton_pipeline.NewtonPipeline(skeleton, args.retarget_source, args.robot_type)
+        pipeline = newton_pipeline.NewtonPipeline(
+            skeleton,
+            args.retarget_source,
+            args.robot_type,
+            retarget_config=retarget_config,
+            show_progress=args.pipeline_progress,
+        )
         for batch_idx, first in enumerate(range(0, len(paths), args.batch_size), start=1):
             batch_paths = paths[first : first + args.batch_size]
             batch_start = time.time()
@@ -252,37 +312,37 @@ def main() -> None:
                 if len(batch_paths) == 1:
                     failed_load += 1
                     _append_row(failures_path, ["path", "error"], {"path": str(batch_paths[0]), "error": repr(exc)})
-                    continue
-                for path in batch_paths:
-                    try:
-                        one_paths, one_anims = _load_batch([path], skeleton)
-                    except Exception as one_exc:
-                        failed_load += 1
-                        _append_row(failures_path, ["path", "error"], {"path": str(path), "error": repr(one_exc)})
-                        print(f"[WARN] failed to load {path}: {one_exc!r}", flush=True)
-                        continue
-                    completed += _retarget_with_split(
-                        pipeline,
-                        one_paths,
-                        one_anims,
-                        source_xform,
-                        import_root,
-                        export_root,
-                        csv_config,
-                        failures_path,
-                    )
-                continue
-
-            completed += _retarget_with_split(
-                pipeline,
-                loaded_paths,
-                animations,
-                source_xform,
-                import_root,
-                export_root,
-                csv_config,
-                failures_path,
-            )
+                    print(f"[WARN] failed to load {batch_paths[0]}: {exc!r}", flush=True)
+                else:
+                    for path in batch_paths:
+                        try:
+                            one_paths, one_anims = _load_batch([path], skeleton)
+                        except Exception as one_exc:
+                            failed_load += 1
+                            _append_row(failures_path, ["path", "error"], {"path": str(path), "error": repr(one_exc)})
+                            print(f"[WARN] failed to load {path}: {one_exc!r}", flush=True)
+                            continue
+                        completed += _retarget_with_split(
+                            pipeline,
+                            one_paths,
+                            one_anims,
+                            source_xform,
+                            import_root,
+                            export_root,
+                            csv_config,
+                            failures_path,
+                        )
+            else:
+                completed += _retarget_with_split(
+                    pipeline,
+                    loaded_paths,
+                    animations,
+                    source_xform,
+                    import_root,
+                    export_root,
+                    csv_config,
+                    failures_path,
+                )
             elapsed = time.time() - started
             batch_elapsed = time.time() - batch_start
             _append_row(
@@ -317,6 +377,20 @@ def main() -> None:
                 f"elapsed={_elapsed(elapsed)} rate={(completed / max(elapsed, 1e-6)) * 3600.0:.1f}/h",
                 flush=True,
             )
+            next_pending_index = first + len(batch_paths)
+            if _planned_recycle_due(
+                batch_idx,
+                args.max_batches_per_process,
+                next_pending_index,
+                total_pending,
+            ):
+                print(
+                    f"[RECYCLE] completed_batches={batch_idx} "
+                    f"remaining_initial_pending={total_pending - next_pending_index} "
+                    f"exit_code={PLANNED_RECYCLE_EXIT_CODE}",
+                    flush=True,
+                )
+                return PLANNED_RECYCLE_EXIT_CODE
 
     elapsed = time.time() - started
     print(
@@ -324,7 +398,8 @@ def main() -> None:
         f"failed_load={failed_load} elapsed={_elapsed(elapsed)}",
         flush=True,
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

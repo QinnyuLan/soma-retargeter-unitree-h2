@@ -17,3 +17,10 @@ imgui.ini
 
 # Generated artifacts
 outputs/
+
+# Dataset-specific manifests and validation experiments
+tools/dataset_export/manifests/
+tools/dataset_export/repair_overlay/
+tools/h2_arm_extension_demo/
+tools/h2_final_dataset_review/
+tools/dataset_export/*_manifest*.csv

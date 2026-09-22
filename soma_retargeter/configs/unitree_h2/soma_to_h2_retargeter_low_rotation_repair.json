@@ -3,26 +3,14 @@
     "num_initialization_frames": 10,
     "num_stabilization_frames": 5,
     "human_robot_scaler_config": "unitree_h2/soma_to_h2_scaler_config.json",
-    "feet_stabilizer_config": "unitree_h2/h2_feet_stabilizer_config.json",
+    "feet_stabilizer_config": "unitree_h2/h2_feet_stabilizer_low_rotation_repair.json",
     "model_height": 1.80,
 
     "ik_iterations" : 24,
     "joint_limit_weight": 10.0,
     "smooth_joint_filter_weight": 6.5,
     "collision_weight" : 0.0,
-    "enable_post_processing" : false,
-    "condition_foot_targets" : true,
-
-    "static_center_of_mass": {
-        "enabled": false,
-        "weight": 0.0,
-        "velocity_threshold_mps": 0.08,
-        "velocity_transition_mps": 0.04,
-        "stationary_hold_s": 0.25,
-        "moving_hold_s": 0.05,
-        "smoothing_window_s": 0.25,
-        "forward_offset_m": 0.03
-    },
+    "enable_post_processing" : true,
 
     "smooth_joint_filter_objective_body_masks" : {
         "left_shoulder_pitch_link" : 0.1,
@@ -44,7 +32,7 @@
             "t_body" : "torso_link",
             "r_body" : "torso_link",
             "t_weight" : 0.7,
-            "r_weight" : 1.4
+            "r_weight" : 0.7
         },
         "LeftArm": {
             "t_body" : "left_shoulder_roll_link",
@@ -91,14 +79,14 @@
         "LeftShin": {
             "t_body" : "left_knee_link",
             "r_body" : "left_knee_link",
-            "t_weight" : 4.0,
+            "t_weight" : 1.0,
             "r_weight" : 1.0
         },
         "LeftFoot": {
             "t_body" : "left_sole_link",
             "r_body" : "left_sole_link",
-            "t_weight" : 48.0,
-            "r_weight" : 1.5
+            "t_weight" : 24.0,
+            "r_weight" : 0.1
         },
         "RightLeg": {
             "t_body" : "right_hip_roll_link",
@@ -109,14 +97,14 @@
         "RightShin": {
             "t_body" : "right_knee_link",
             "r_body" : "right_knee_link",
-            "t_weight" : 4.0,
+            "t_weight" : 1.0,
             "r_weight" : 1.0
         },
         "RightFoot": {
             "t_body" : "right_sole_link",
             "r_body" : "right_sole_link",
-            "t_weight" : 48.0,
-            "r_weight" : 1.5
+            "t_weight" : 24.0,
+            "r_weight" : 0.1
         }
     }
 }

@@ -174,6 +174,23 @@ def save_csv(file_path: str, buffer: CSVAnimationBuffer, csv_config: RobotCSVCon
     if buffer is None or buffer.num_frames == 0:
         raise RuntimeError("[ERROR]: Empty or invalid buffer.")
 
+    if isinstance(buffer.data, np.ndarray) and buffer.data.ndim == 2 and buffer.data.shape[1] >= 7:
+        data = buffer.data
+        frames = np.arange(buffer.num_frames, dtype=np.int32)[:, None]
+        root_translation_cm = data[:, 0:3] * 100.0
+        root_rotation_deg = R.from_quat(data[:, 3:7]).as_euler("xyz", degrees=True)
+        joint_dofs_deg = np.rad2deg(data[:, 7:])
+        rows = np.concatenate((frames, root_translation_cm, root_rotation_deg, joint_dofs_deg), axis=1)
+        np.savetxt(
+            file_path,
+            rows,
+            delimiter=",",
+            header=",".join(csv_config.csv_header),
+            comments="",
+            fmt=["%d", *["%.9g"] * (rows.shape[1] - 1)],
+        )
+        return
+
     with open(file_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(csv_config.csv_header)
